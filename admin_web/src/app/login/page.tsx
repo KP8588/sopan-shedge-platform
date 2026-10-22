@@ -33,7 +33,9 @@ export default function LoginPage() {
       }
 
       sessionStorage.setItem("admin_token", data.token);
-      router.push("/trainers");
+      const params = new URLSearchParams(window.location.search);
+const next = params.get("next");
+router.push(next === "/courses" ? "/courses" : "/");
     } catch (err) {
       setError(
         err instanceof Error ? err.message : "Unable to connect to the server."
