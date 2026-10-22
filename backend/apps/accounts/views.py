@@ -1,11 +1,18 @@
-﻿from django.contrib.auth import authenticate
+﻿
+from django.contrib.auth import authenticate, get_user_model
 from rest_framework import status
 from rest_framework.authtoken.models import Token
+from rest_framework.exceptions import PermissionDenied
 from rest_framework.permissions import AllowAny, IsAuthenticated
 from rest_framework.response import Response
 from rest_framework.views import APIView
 
-from apps.accounts.serializers import RegisterSerializer, UserProfileSerializer
+from apps.accounts.serializers import (
+    RegisterSerializer,
+    UserProfileSerializer,
+)
+
+User = get_user_model()
 
 
 class RegisterView(APIView):
@@ -69,10 +76,12 @@ class MeView(APIView):
     permission_classes = [IsAuthenticated]
 
     def get(self, request):
-        return Response({
-            "success": True,
-            "user": UserProfileSerializer(request.user).data,
-        })
+        return Response(
+            {
+                "success": True,
+                "user": UserProfileSerializer(request.user).data,
+            }
+        )
 
 
 class LogoutView(APIView):
@@ -82,4 +91,27 @@ class LogoutView(APIView):
         request.auth.delete()
         return Response(
             {"success": True, "message": "Logged out successfully."}
+        )
+
+
+class TrainerListView(APIView):
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        profile = getattr(request.user, "profile", None)
+
+        if not request.user.is_staff and (
+            profile is None or profile.role != "ADMIN"
+        ):
+            raise PermissionDenied(
+                "Only administrators can view trainers."
+            )
+
+        trainers = User.objects.filter(
+            is_active=True,
+            profile__role="TRAINER",
+        ).order_by("username")
+
+        return Response(
+            UserProfileSerializer(trainers, many=True).data
         )

@@ -1,11 +1,14 @@
+
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 
 type Trainer = {
   id: number;
   username: string;
   email: string;
+  role: string;
 };
 
 export default function TrainersPage() {
@@ -14,70 +17,106 @@ export default function TrainersPage() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    fetch("http://127.0.0.1:8000/api/auth/users/")
-      .then((response) => {
-        if (!response.ok) throw new Error("Unable to load trainers");
-        return response.json();
-      })
-      .then((data) => {
+    async function loadTrainers() {
+      const token = sessionStorage.getItem("admin_token");
+
+      if (!token) {
+        window.location.href = "/login";
+        return;
+      }
+
+      try {
+        const response = await fetch(
+          "http://127.0.0.1:8000/api/auth/users/",
+          {
+            headers: {
+              Authorization: `Token ${token}`,
+              Accept: "application/json",
+            },
+          }
+        );
+
+        if (response.status === 401 || response.status === 403) {
+          sessionStorage.removeItem("admin_token");
+          window.location.href = "/login";
+          return;
+        }
+
+        if (!response.ok) {
+          throw new Error(`API request failed (${response.status})`);
+        }
+
+        const data = await response.json();
         const users = Array.isArray(data) ? data : data.results ?? [];
-        setTrainers(users.filter((user: Trainer & { role?: string }) =>
-          user.role === "TRAINER"
-        ));
-      })
-      .catch(() => setError("Unable to load trainers. The API endpoint may not exist yet."))
-      .finally(() => setLoading(false));
+        setTrainers(
+          users.filter((user: Trainer) => user.role === "TRAINER")
+        );
+      } catch (err) {
+        setError(
+          err instanceof Error
+            ? err.message
+            : "Unable to connect to the Django API."
+        );
+      } finally {
+        setLoading(false);
+      }
+    }
+
+    loadTrainers();
   }, []);
 
   return (
     <main className="min-h-screen bg-slate-100 p-6 text-slate-900 md:p-10">
-      <a href="/" className="text-blue-600 hover:underline">
+      <Link href="/" className="text-blue-600 hover:underline">
         ← Back to Dashboard
-      </a>
+      </Link>
 
-      <header className="mt-6 flex flex-wrap items-center justify-between gap-4">
+      <div className="mt-8 flex items-center justify-between gap-4">
         <div>
           <p className="text-sm text-slate-500">Administration</p>
           <h1 className="mt-1 text-3xl font-bold">Trainers</h1>
-          <p className="mt-2 text-slate-600">Manage your platform trainers.</p>
+          <p className="mt-2">Manage your platform trainers.</p>
         </div>
-        <span className="rounded-full bg-white px-4 py-3 shadow-sm">
+
+        <div className="rounded-full bg-white px-5 py-3 shadow">
           Total trainers: {trainers.length}
-        </span>
-      </header>
+        </div>
+      </div>
 
-      <section className="mt-8 overflow-x-auto rounded-2xl bg-white p-6 shadow-sm">
-        {loading && <p>Loading trainers...</p>}
-        {error && <p className="rounded-lg bg-red-50 p-4 text-red-700">{error}</p>}
-
-        {!loading && !error && (
-          <table className="w-full text-left text-sm">
-            <thead className="border-b bg-slate-50">
-              <tr>
-                <th className="p-3">ID</th>
-                <th className="p-3">Username</th>
-                <th className="p-3">Email</th>
-                <th className="p-3">Role</th>
-              </tr>
-            </thead>
-            <tbody>
-              {trainers.map((trainer) => (
-                <tr key={trainer.id} className="border-b">
-                  <td className="p-3">{trainer.id}</td>
-                  <td className="p-3">{trainer.username}</td>
-                  <td className="p-3">{trainer.email || "—"}</td>
-                  <td className="p-3">TRAINER</td>
+      <section className="mt-8 rounded-2xl bg-white p-6 shadow-sm">
+        {loading ? (
+          <p>Loading trainers...</p>
+        ) : error ? (
+          <p role="alert" className="rounded-lg bg-red-50 p-4 text-red-700">
+            {error}
+          </p>
+        ) : trainers.length === 0 ? (
+          <p className="text-slate-600">
+            No trainers found. Create or assign a user with the TRAINER role.
+          </p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-left">
+              <thead>
+                <tr className="border-b text-sm text-slate-500">
+                  <th className="p-3">ID</th>
+                  <th className="p-3">Username</th>
+                  <th className="p-3">Email</th>
+                  <th className="p-3">Role</th>
                 </tr>
-              ))}
-              {trainers.length === 0 && (
-                <tr>
-                  <td colSpan={4} className="p-6 text-center text-slate-500">
-                    No trainers found.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {trainers.map((trainer) => (
+                  <tr key={trainer.id} className="border-b last:border-0">
+                    <td className="p-3">{trainer.id}</td>
+                    <td className="p-3">{trainer.username}</td>
+                    <td className="p-3">{trainer.email || "—"}</td>
+                    <td className="p-3">{trainer.role}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </main>
