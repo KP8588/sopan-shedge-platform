@@ -46,3 +46,13 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Environment and local secrets
+.env.local
+.env.production
+*.sqlite3
+
+# Environment and local secrets
+.env.local
+.env.production
+*.sqlite3
