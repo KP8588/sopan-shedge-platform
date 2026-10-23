@@ -1,4 +1,3 @@
-﻿
 from django.urls import path
 
 from apps.accounts.views import (
@@ -9,9 +8,9 @@ from apps.accounts.views import (
     TrainerCreateView,
     TrainerListView,
     StudentListView,
+    StudentCreateView,
+    StudentManageView,
     StudentStatusUpdateView,
-StudentListView,
-StudentStatusUpdateView,
 )
 
 urlpatterns = [
@@ -22,10 +21,7 @@ urlpatterns = [
     path("users/", TrainerListView.as_view(), name="users"),
     path("trainers/create/", TrainerCreateView.as_view(), name="trainer-create"),
     path("students/", StudentListView.as_view(), name="student-list"),
-    path(
-        "students/<int:pk>/",
-        StudentStatusUpdateView.as_view(),
-        name="student-status-update",
-    ),
-
+    path("students/create/", StudentCreateView.as_view(), name="student-create"),
+    path("students/<int:pk>/manage/", StudentManageView.as_view(), name="student-manage"),
+    path("students/<int:pk>/", StudentStatusUpdateView.as_view(), name="student-status-update"),
 ]
