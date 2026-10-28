@@ -1,0 +1,77 @@
+﻿import os
+from datetime import timedelta
+
+from django.shortcuts import get_object_or_404
+from rest_framework import status
+from rest_framework.authentication import SessionAuthentication
+from rest_framework.authentication import TokenAuthentication
+from rest_framework.decorators import (
+    api_view,
+    authentication_classes,
+    permission_classes,
+)
+from rest_framework.permissions import IsAuthenticated
+from rest_framework.response import Response
+
+from livekit import api
+
+from apps.classrooms.models import Classroom
+
+
+@api_view(["POST"])
+@authentication_classes([TokenAuthentication, SessionAuthentication])
+@permission_classes([IsAuthenticated])
+def livekit_token(request, classroom_id):
+    """Issue a short-lived LiveKit token for an authenticated class participant."""
+    server_url = os.environ.get("LIVEKIT_URL", "").strip()
+    api_key = os.environ.get("LIVEKIT_API_KEY", "").strip()
+    api_secret = os.environ.get("LIVEKIT_API_SECRET", "").strip()
+
+    if not server_url or not api_key or not api_secret:
+        return Response(
+            {"detail": "Live classroom service is not configured."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    classroom = get_object_or_404(
+        Classroom,
+        pk=classroom_id,
+        is_active=True,
+    )
+
+    is_trainer = classroom.trainer_id == request.user.pk
+
+    # Room names use internal IDs, not student names or email addresses.
+    room_name = f"sopan-class-{classroom.pk}"
+    identity = f"user-{request.user.pk}"
+
+    try:
+        grants = api.VideoGrants(
+            room_join=True,
+            room=room_name,
+            can_publish=is_trainer,
+            can_subscribe=True,
+            can_publish_data=is_trainer,
+        )
+
+        token = (
+            api.AccessToken(api_key, api_secret)
+            .with_identity(identity)
+            .with_name("Trainer" if is_trainer else "Student")
+            .with_grants(grants)
+            .with_ttl(timedelta(hours=2))
+            .to_jwt()
+        )
+    except Exception:
+        return Response(
+            {"detail": "Could not create classroom access token."},
+            status=status.HTTP_503_SERVICE_UNAVAILABLE,
+        )
+
+    return Response({
+        "serverUrl": server_url,
+        "token": token,
+        "roomName": room_name,
+        "identity": identity,
+        "isTrainer": is_trainer,
+    })

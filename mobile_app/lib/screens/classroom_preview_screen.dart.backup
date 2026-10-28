@@ -1,0 +1,458 @@
+﻿import 'dart:async';
+import 'dart:convert';
+
+import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'package:livekit_client/livekit_client.dart';
+
+import '../services/api_service.dart';
+
+const _navy = Color(0xFF101D3A);
+const _gold = Color(0xFFE3B341);
+
+class ClassroomPreviewScreen extends StatefulWidget {
+  const ClassroomPreviewScreen({
+    super.key,
+    required this.classroom,
+  });
+
+  final Map<String, dynamic> classroom;
+
+  @override
+  State<ClassroomPreviewScreen> createState() =>
+      _ClassroomPreviewScreenState();
+}
+
+class _ClassroomPreviewScreenState extends State<ClassroomPreviewScreen> {
+  Room? _room;
+  CancelListenFunc? _roomEvents;
+
+  bool _connecting = true;
+  bool _connected = false;
+  bool _isTrainer = false;
+  bool _micEnabled = true;
+  bool _cameraEnabled = true;
+  bool _leaving = false;
+  String _status = 'Preparing classroom…';
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectToClassroom();
+  }
+
+  Future<void> _connectToClassroom() async {
+    final classroomId =
+        int.tryParse(widget.classroom['id']?.toString() ?? '');
+    final token = ApiService.authToken;
+
+    if (classroomId == null || classroomId <= 0) {
+      _fail('This classroom has an invalid ID.');
+      return;
+    }
+
+    if (token == null || token.isEmpty) {
+      _fail('Your session has expired. Please log in again.');
+      return;
+    }
+
+    try {
+      if (mounted) {
+        setState(() {
+          _connecting = true;
+          _error = null;
+          _status = 'Requesting secure classroom access…';
+        });
+      }
+
+      final baseUrl =
+          ApiService.baseUrl.replaceFirst(RegExp(r'/+$'), '');
+      final response = await http
+          .post(
+            Uri.parse(
+              '$baseUrl/api/classrooms/$classroomId/livekit-token/',
+            ),
+            headers: {
+              'Accept': 'application/json',
+              'Authorization': 'Token $token',
+            },
+          )
+          .timeout(const Duration(seconds: 15));
+
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Django returned HTTP ${response.statusCode}: '
+          '${response.body}',
+        );
+      }
+
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final serverUrl = data['serverUrl']?.toString() ?? '';
+      final roomToken = data['token']?.toString() ?? '';
+
+      if (serverUrl.isEmpty || roomToken.isEmpty) {
+        throw Exception('Django returned incomplete LiveKit credentials.');
+      }
+
+      _isTrainer = data['isTrainer'] == true;
+
+      if (mounted) {
+        setState(() => _status = 'Connecting to live media…');
+      }
+
+      final room = Room(
+        roomOptions: const RoomOptions(
+          adaptiveStream: true,
+          dynacast: true,
+        ),
+      );
+
+      _room = room;
+
+      room.addListener(_onRoomChanged);
+
+      _roomEvents = room.events.listen((event) {
+        if (!mounted) return;
+        setState(() {
+          _status = 'Live classroom connected';
+        });
+      });
+
+      debugPrint('LIVEKIT URL received: ${Uri.encodeFull(serverUrl)}');
+debugPrint('LIVEKIT URL scheme: ${Uri.tryParse(serverUrl)?.scheme}');
+debugPrint('LIVEKIT URL host: ${Uri.tryParse(serverUrl)?.host}');
+
+      await room.connect(serverUrl, roomToken);
+
+      // Students join in listen-only mode. Only the trainer publishes
+      // camera and microphone tracks with the current backend grants.
+      if (_isTrainer) {
+        await room.localParticipant?.setCameraEnabled(true);
+        await room.localParticipant?.setMicrophoneEnabled(true);
+      }
+
+      if (!mounted) return;
+
+      setState(() {
+        _connecting = false;
+        _connected = true;
+        _status = _isTrainer
+            ? 'You are live as the trainer'
+            : 'Connected • Listen-only mode';
+      });
+    } catch (e) {
+      _fail('Could not join classroom. $e');
+      await _disconnectRoom();
+    }
+  }
+
+  void _onRoomChanged() {
+    if (mounted) setState(() {});
+  }
+
+  void _fail(String message) {
+    if (!mounted) return;
+    setState(() {
+      _connecting = false;
+      _connected = false;
+      _error = message;
+      _status = 'Connection failed';
+    });
+  }
+
+  VideoTrack? _visibleVideoTrack() {
+    final room = _room;
+    if (room == null) return null;
+
+    // The trainer sees their own camera. Students see the first available
+    // remote video track, normally the trainer's camera.
+    if (_isTrainer) {
+      final local = room.localParticipant;
+      if (local != null) {
+        for (final publication in local.trackPublications.values) {
+          final track = publication.track;
+          if (track is VideoTrack) return track as VideoTrack;
+        }
+      }
+    }
+
+    for (final participant in room.remoteParticipants.values) {
+      for (final publication in participant.trackPublications.values) {
+        final track = publication.track;
+        if (track is VideoTrack) return track as VideoTrack;
+      }
+    }
+
+    return null;
+  }
+
+  Future<void> _toggleMicrophone() async {
+    final room = _room;
+    if (!_isTrainer || room?.localParticipant == null) return;
+
+    final next = !_micEnabled;
+    try {
+      await room!.localParticipant!.setMicrophoneEnabled(next);
+      if (mounted) setState(() => _micEnabled = next);
+    } catch (e) {
+      _showMessage('Microphone update failed: $e');
+    }
+  }
+
+  Future<void> _toggleCamera() async {
+    final room = _room;
+    if (!_isTrainer || room?.localParticipant == null) return;
+
+    final next = !_cameraEnabled;
+    try {
+      await room!.localParticipant!.setCameraEnabled(next);
+      if (mounted) setState(() => _cameraEnabled = next);
+    } catch (e) {
+      _showMessage('Camera update failed: $e');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
+  }
+
+  Future<void> _disconnectRoom() async {
+    _roomEvents?.call();
+    _roomEvents = null;
+
+    final room = _room;
+    _room = null;
+
+    if (room != null) {
+      room.removeListener(_onRoomChanged);
+      try {
+        await room.disconnect();
+      } catch (_) {}
+      await room.dispose();
+    }
+  }
+
+  Future<void> _leaveClassroom() async {
+    if (_leaving) return;
+    setState(() => _leaving = true);
+
+    await _disconnectRoom();
+
+    if (mounted) {
+      Navigator.of(context).pop();
+    }
+  }
+
+  @override
+  void dispose() {
+    _roomEvents?.call();
+    final room = _room;
+    _room = null;
+
+    if (room != null) {
+      room.removeListener(_onRoomChanged);
+      unawaited(room.disconnect());
+      unawaited(room.dispose());
+    }
+
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final videoTrack = _visibleVideoTrack();
+
+    return Scaffold(
+      backgroundColor: _navy,
+      appBar: AppBar(
+        backgroundColor: _navy,
+        foregroundColor: Colors.white,
+        title: Text(
+          (widget.classroom['title'] ?? 'Sopan Live Classroom').toString(),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.all(16),
+              child: Row(
+                children: [
+                  Icon(
+                    _connected ? Icons.circle : Icons.circle_outlined,
+                    color: _connected ? Colors.greenAccent : _gold,
+                    size: 12,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _status,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                  ),
+                  if (_connected)
+                    const Icon(Icons.security, color: Colors.greenAccent),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 16),
+                width: double.infinity,
+                clipBehavior: Clip.antiAlias,
+                decoration: BoxDecoration(
+                  color: Colors.black,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: _gold, width: 1.5),
+                ),
+                child: _connecting
+                    ? const Center(
+                        child: CircularProgressIndicator(color: _gold),
+                      )
+                    : _error != null
+                        ? Center(
+                            child: Padding(
+                              padding: const EdgeInsets.all(20),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const Icon(
+                                    Icons.videocam_off,
+                                    color: Colors.white70,
+                                    size: 48,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  Text(
+                                    _error!,
+                                    style: const TextStyle(color: Colors.white),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 16),
+                                  FilledButton(
+                                    onPressed: _connectToClassroom,
+                                    child: const Text('Try Again'),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          )
+                        : videoTrack != null
+                            ? VideoTrackRenderer(
+                                videoTrack,
+                                fit: VideoViewFit.cover,
+                              )
+                            : const Center(
+                                child: Padding(
+                                  padding: EdgeInsets.all(24),
+                                  child: Column(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        Icons.school,
+                                        color: _gold,
+                                        size: 64,
+                                      ),
+                                      SizedBox(height: 16),
+                                      Text(
+                                        'You are in the classroom',
+                                        style: TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 20,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      SizedBox(height: 8),
+                                      Text(
+                                        'Waiting for the trainer video…',
+                                        style: TextStyle(color: Colors.white70),
+                                        textAlign: TextAlign.center,
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                children: [
+                  if (_isTrainer) ...[
+                    _ControlButton(
+                      icon: _micEnabled ? Icons.mic : Icons.mic_off,
+                      label: _micEnabled ? 'Mute' : 'Unmute',
+                      onPressed: _connected ? _toggleMicrophone : null,
+                    ),
+                    _ControlButton(
+                      icon: _cameraEnabled
+                          ? Icons.videocam
+                          : Icons.videocam_off,
+                      label: _cameraEnabled ? 'Camera On' : 'Camera Off',
+                      onPressed: _connected ? _toggleCamera : null,
+                    ),
+                  ],
+                  _ControlButton(
+                    icon: Icons.call_end,
+                    label: 'Leave',
+                    onPressed: _leaving ? null : _leaveClassroom,
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.only(bottom: 16),
+              child: Text(
+                'Class ID: ${widget.classroom['id'] ?? 'Unavailable'}',
+                style: const TextStyle(
+                  color: Colors.white60,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ControlButton extends StatelessWidget {
+  const _ControlButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton.filled(
+          onPressed: onPressed,
+          icon: Icon(icon),
+          style: IconButton.styleFrom(
+            backgroundColor: _gold,
+            foregroundColor: _navy,
+            disabledBackgroundColor: Colors.grey,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          label,
+          style: const TextStyle(color: Colors.white, fontSize: 12),
+        ),
+      ],
+    );
+  }
+}
+

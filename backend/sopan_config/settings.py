@@ -17,7 +17,7 @@ from pathlib import Path
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 load_dotenv(BASE_DIR.parent / ".env")
-
+load_dotenv(BASE_DIR / ".env", override=True)
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
@@ -27,12 +27,17 @@ SECRET_KEY = os.environ["DJANGO_SECRET_KEY"]
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+    "127.0.0.1",
+    "localhost",
+    "10.84.104.230",
+]
 
 
 # Application definition
 
 INSTALLED_APPS = [
+    'channels',
     "corsheaders",
     "django.contrib.admin",
     "django.contrib.auth",
@@ -76,6 +81,7 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = "sopan_config.wsgi.application"
+ASGI_APPLICATION = "sopan_config.asgi.application"
 
 
 # Database
@@ -144,6 +150,16 @@ REST_FRAMEWORK = {
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
-    "http://localhost:58056",
-    "http://127.0.0.1:58056",
 ]
+
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^http://localhost:\d+$",
+    r"^http://127\.0\.0\.1:\d+$",
+]
+
+# Local development only. Use Redis for multi-process/production deployments.
+CHANNEL_LAYERS = {
+    "default": {
+        "BACKEND": "channels.layers.InMemoryChannelLayer",
+    },
+}

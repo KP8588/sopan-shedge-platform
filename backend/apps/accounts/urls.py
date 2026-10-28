@@ -1,4 +1,4 @@
-from django.urls import path
+﻿from django.urls import path
 
 from apps.accounts.views import (
     LoginView,
@@ -11,12 +11,18 @@ from apps.accounts.views import (
     StudentCreateView,
     StudentManageView,
     StudentStatusUpdateView,
+    MyReferralView,
+    ReferralTreeAdminView,
+    CommissionAdminView,
 )
 
 urlpatterns = [
     path("register/", RegisterView.as_view(), name="register"),
     path("login/", LoginView.as_view(), name="login"),
     path("me/", MeView.as_view(), name="me"),
+    path("referrals/me/", MyReferralView.as_view(), name="my-referrals"),
+    path("referrals/tree/", ReferralTreeAdminView.as_view(), name="referral-tree-admin"),
+    path("commissions/", CommissionAdminView.as_view(), name="commission-admin-list"),
     path("logout/", LogoutView.as_view(), name="logout"),
     path("users/", TrainerListView.as_view(), name="users"),
     path("trainers/create/", TrainerCreateView.as_view(), name="trainer-create"),
