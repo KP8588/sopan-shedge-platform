@@ -1,0 +1,56 @@
+﻿# Python / Django
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+*.sqlite3
+db.sqlite3
+.env
+.env.*
+!.env.example
+media/
+staticfiles/
+
+# Flutter
+.dart_tool/
+.packages
+.pub-cache/
+build/
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+android/local.properties
+ios/Flutter/.last_build_id
+
+# Node / Next.js
+node_modules/
+.next/
+out/
+dist/
+.env.local
+.env.production
+.env.development
+
+# IDE / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.log
+
+# Archives and backups
+*.zip
+*.bak
+*.backup
+*.before_*
+*.sqlite3.backup*
+
+# Large archives and backups
+*.zip
+*.bak
+*.backup
+*.before_*
+*.sqlite3
+*.sqlite3.backup*
+backups/
+backup_*/
